@@ -1,123 +1,195 @@
 <!DOCTYPE html>
 <html lang="en">
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SQL DDL 解析生成图</title>
-    <link rel="stylesheet" href="main.css">
-    <script src="https://unpkg.com/@antv/g6@5/dist/g6.min.js"></script>
-</head>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>SQL DDL 解析生成图</title>
+		<link rel="stylesheet" href="main.css">
+		<script src="https://unpkg.com/@antv/g6@5/dist/g6.min.js"></script>
+	</head>
 
-<body>
-    <div class="container">
-        <h1>SQL DDL 解析生成图</h1>
-        <textarea id="ddlInput" placeholder="请输入 SQL DDL 语句"></textarea>
-        <button id="parseButton">解析</button>
-        <div id="graphContainer" style="width: 800px; height: 600px;"></div>
-    </div>
-    <script>
-		function initDDL() {
-			return "-- 创建用户表
-CREATE TABLE users (
-    user_id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL
-);
+	<body>
+		<div class="container">
+			<h1>SQL DDL 解析生成图</h1>
+			<textarea id="ddlInput" placeholder="请输入 SQL DDL 语句"></textarea>
+			<button id="parseButton">解析</button>
+			<div id="graphContainer" style="width: 1200; height: 800; background-color: aliceblue;"></div>
+		</div>
+		<script>
+			function initDDL() {
+				return "-- 创建用户表\n" +
+					"CREATE TABLE users (\n" +
+					"    user_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+					"    username VARCHAR(50) NOT NULL,\n" +
+					"    email VARCHAR(100) UNIQUE NOT NULL\n" +
+					");\n" +
+					"\n" +
+					"-- 创建订单表\n" +
+					"CREATE TABLE orders (\n" +
+					"    order_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+					"    user_id INT,\n" +
+					"    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+					"    FOREIGN KEY (user_id) REFERENCES users(user_id)\n" +
+					");";
+			}
+			document.getElementById('parseButton').addEventListener('click', function() {
+				let ddlInput = document.getElementById('ddlInput').value;
+				ddlInput = initDDL();
+				const entities = {};
+				const relationships = [];
+				const allNodes = [];
+				const allEdges = [];
 
--- 创建订单表
-CREATE TABLE orders (
-    order_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT,
-    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);";
-		}
-        document.getElementById('parseButton').addEventListener('click', function () {
-            const ddlInput = document.getElementById('ddlInput').value;
-			ddlInput = initDDL();
-            const entities = {};
-            const relationships = [];
+				const lines = ddlInput.split('\n');
+				let currentTable = null;
+				let currentFk = null;
 
-            const lines = ddlInput.split('\n');
-            let currentTable = null;
-            lines.forEach(line => {
-                line = line.trim();
-                if (line.startsWith('CREATE TABLE')) {
-                    currentTable = line.match(/CREATE TABLE (\w+)/)[1];
-                    entities[currentTable] = [];
-                } else if (currentTable && line.includes('REFERENCES')) {
-                    const match = line.match(/(\w+)\s+\w+\s+REFERENCES\s+(\w+)\s*\((\w+)\)/);
-                    if (match) {
-                        const fromColumn = match[1];
-                        const toTable = match[2];
-                        const toColumn = match[3];
-                        relationships.push({
-                            source: currentTable,
-                            target: toTable,
-                            label: `${fromColumn} -> ${toColumn}`
-                        });
-                    }
-                } else if (currentTable && line.includes('PRIMARY KEY')) {
-                    const match = line.match(/PRIMARY KEY\s*\(([\w,]+)\)/);
-                    if (match) {
-                        const primaryKeys = match[1].split(',');
-                        primaryKeys.forEach(key => {
-                            entities[currentTable].push({ name: key.trim(), isPrimary: true });
-                        });
-                    }
-                } else if (currentTable && line.includes(';')) {
-                    currentTable = null;
-                } else if (currentTable) {
-                    const match = line.match(/(\w+)\s+\w+/);
-                    if (match) {
-                        const column = match[1];
-                        entities[currentTable].push({ name: column, isPrimary: false });
-                    }
-                }
-            });
-			console.log(entities);
-			console.log(relationships);
-            const nodes = Object.keys(entities).map(table => ({
-                id: table,
-				type: "circle",
-                data: {"name": table}
-            }));
+				lines.forEach(line => {
+					line = line.trim();
+					if (line.startsWith('CREATE TABLE')) {
+						currentTable = line.match(/CREATE TABLE (\w+)/)[1];
+						entities[currentTable] = {
+							columns: []
+						};
+					} else if (line.includes('PRIMARY KEY')) {
+						const match = line.match(/PRIMARY KEY\s*\(([\w,]+)\)/);
+						if (match) {
+							const primaryKeys = match[1].split(',');
+							primaryKeys.forEach(key => {
+								entities[currentTable].columns.push({
+									name: key.trim(),
+									isPrimary: true
+								});
+							});
+						}
+					} else if (line.includes('FOREIGN KEY')) {
+						const fkMatch = line.match(/FOREIGN KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)/);
+						if (fkMatch) {
+							currentFk = {
+								fromTable: currentTable,
+								fromColumn: fkMatch[1],
+								toTable: fkMatch[2],
+								toColumn: fkMatch[3]
+							};
+						}
+					} else if (currentFk) {
+						relationships.push(currentFk);
+						currentFk = null;
+					} else if (currentTable && line.includes(';')) {
+						currentTable = null;
+					} else if (currentTable) {
+						const match = line.match(/(\w+)\s+\w+/);
+						if (match) {
+							const column = match[1];
+							entities[currentTable].columns.push({
+								name: column,
+								isPrimary: false
+							});
+						}
+					}
+				});
 
-            const data = {
-                nodes,
-                edges: relationships
-            };
+				// 生成表节点和属性节点以及它们之间的连线
+				for (const table in entities) {
+					const tableNode = {
+						id: table,
+						label: table,
+						team: table,
+						size: 30,
+						type: 'rect' // 表节点用矩形表示
+					};
+					allNodes.push(tableNode);
 
-            const graph = new G6.Graph({
-                container: 'graphContainer',
-                autoFit: 'view',
-                data,
-                node: {
-                    style: {
-                        size: 30
-                    },
-                    label: {
-                        position: 'center'
-                    }
-                },
-                edge: {
-                    label: {
-                        position: 'center'
-                    }
-                },
-                layout: {
-                    type: 'd3-force',
-                    manyBody: {},
-                    x: {},
-                    y: {}
-                },
-                behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element']
-            });
+					entities[table].columns.forEach(column => {
+						const columnNode = {
+							id: `${table}_${column.name}`,
+							label: column.name,
+							team: table,
+							size: 20,
+							type: 'circle' // 属性节点用圆形表示
+						};
+						allNodes.push(columnNode);
 
-            graph.render();
-        });
-    </script>
-</body>
+						const edge = {
+							source: table,
+							target: `${table}_${column.name}`,
+							label: ''
+						};
+						allEdges.push(edge);
+					});
+				}
+
+				// 生成表之间的外键连线
+				relationships.forEach(rel => {
+					const edge = {
+						source: rel.fromTable,
+						target: rel.toTable,
+						label: `${rel.fromColumn} -> ${rel.toColumn}`
+					};
+					allEdges.push(edge);
+				});
+
+				const data = {
+					nodes: allNodes,
+					edges: allEdges
+				};
+				const graph = new G6.Graph({
+					container: 'graphContainer',
+					autoFit: 'view',
+					data: data,
+					node: {
+						style: {
+							labelText: (d) => d.label,
+							labelPlacement: "center",
+						},
+
+					},
+					edge: {
+						label: {
+							position: 'center'
+						}
+					},
+					layout: {
+						type: 'd3-force',
+						link: {
+							distance: (d) => {
+								// 同一团队内的连接距离更短
+								if (d.source.team === d.target.team) return 50;
+								// 不同团队间的连接距离更长
+								return 200;
+							},
+							strength: (d) => {
+								// 同一团队内的连接强度更大
+								if (d.source.team === d.target.team) return 0.7;
+								// 不同团队间的连接强度更小
+								return 0.1;
+							},
+						},
+						// 配置多体力 - 控制节点间的排斥力
+						manyBody: {
+							strength: (d) => {
+								// 团队领导节点（编号1）的排斥力更强
+								if (d.label.endsWith('1')) return -100;
+								return -30;
+							},
+						},
+						// 配置碰撞力 - 防止节点重叠
+						collide: {
+							radius: 35,
+							strength: 0.8,
+						},
+						// 配置中心力 - 保持图形在画布中心
+						center: {
+							strength: 0.05,
+						},
+					},
+					behaviors: ['drag-element-force'],
+				});
+
+				graph.render();
+			});
+		</script>
+	</body>
 
 </html>
