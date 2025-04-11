@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL DDL 解析生成图</title>
+    <link rel="stylesheet" href="main.css">
+    <script src="https://unpkg.com/@antv/g6@5/dist/g6.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>SQL DDL 解析生成图</h1>
+        <textarea id="ddlInput" placeholder="请输入 SQL DDL 语句"></textarea>
+        <button id="parseButton">解析</button>
+        <div id="graphContainer" style="width: 800px; height: 600px;"></div>
+    </div>
+    <script>
+		function initDDL() {
+			return "-- 创建用户表
+CREATE TABLE users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL
+);
+
+-- 创建订单表
+CREATE TABLE orders (
+    order_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);";
+		}
+        document.getElementById('parseButton').addEventListener('click', function () {
+            const ddlInput = document.getElementById('ddlInput').value;
+			ddlInput = initDDL();
+            const entities = {};
+            const relationships = [];
+
+            const lines = ddlInput.split('\n');
+            let currentTable = null;
+            lines.forEach(line => {
+                line = line.trim();
+                if (line.startsWith('CREATE TABLE')) {
+                    currentTable = line.match(/CREATE TABLE (\w+)/)[1];
+                    entities[currentTable] = [];
+                } else if (currentTable && line.includes('REFERENCES')) {
+                    const match = line.match(/(\w+)\s+\w+\s+REFERENCES\s+(\w+)\s*\((\w+)\)/);
+                    if (match) {
+                        const fromColumn = match[1];
+                        const toTable = match[2];
+                        const toColumn = match[3];
+                        relationships.push({
+                            source: currentTable,
+                            target: toTable,
+                            label: `${fromColumn} -> ${toColumn}`
+                        });
+                    }
+                } else if (currentTable && line.includes('PRIMARY KEY')) {
+                    const match = line.match(/PRIMARY KEY\s*\(([\w,]+)\)/);
+                    if (match) {
+                        const primaryKeys = match[1].split(',');
+                        primaryKeys.forEach(key => {
+                            entities[currentTable].push({ name: key.trim(), isPrimary: true });
+                        });
+                    }
+                } else if (currentTable && line.includes(';')) {
+                    currentTable = null;
+                } else if (currentTable) {
+                    const match = line.match(/(\w+)\s+\w+/);
+                    if (match) {
+                        const column = match[1];
+                        entities[currentTable].push({ name: column, isPrimary: false });
+                    }
+                }
+            });
+			console.log(entities);
+			console.log(relationships);
+            const nodes = Object.keys(entities).map(table => ({
+                id: table,
+				type: "circle",
+                data: {"name": table}
+            }));
+
+            const data = {
+                nodes,
+                edges: relationships
+            };
+
+            const graph = new G6.Graph({
+                container: 'graphContainer',
+                autoFit: 'view',
+                data,
+                node: {
+                    style: {
+                        size: 30
+                    },
+                    label: {
+                        position: 'center'
+                    }
+                },
+                edge: {
+                    label: {
+                        position: 'center'
+                    }
+                },
+                layout: {
+                    type: 'd3-force',
+                    manyBody: {},
+                    x: {},
+                    y: {}
+                },
+                behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element']
+            });
+
+            graph.render();
+        });
+    </script>
+</body>
+
+</html>
