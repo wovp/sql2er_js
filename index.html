@@ -14,9 +14,19 @@
 			<h1>SQL DDL 解析生成图</h1>
 			<textarea id="ddlInput" placeholder="请输入 SQL DDL 语句"></textarea>
 			<button id="parseButton">解析</button>
+			<button id="clearButton">清空</button> <!-- 新增清空按钮 -->
 			<div id="graphContainer" style="width: 1200; height: 800; background-color: aliceblue;"></div>
 		</div>
 		<script>
+			let graphInstance = null; // 用于保存图表实例
+			// 创建离屏canvas用于测量文本
+			const textMeasurer = document.createElement('canvas').getContext('2d');
+
+			function getTextWidth(text, fontSize) {
+				textMeasurer.font = `${fontSize}px Arial`;
+				return textMeasurer.measureText(text).width;
+			}
+
 			function initDDL() {
 				return "-- 创建用户表\n" +
 					"CREATE TABLE users (\n" +
@@ -33,7 +43,23 @@
 					"    FOREIGN KEY (user_id) REFERENCES users(user_id)\n" +
 					");";
 			}
+			document.getElementById('clearButton').addEventListener('click', function() {
+			  // 清空输入框
+			  document.getElementById('ddlInput').value = '';
+			  
+			  // 销毁已有图表
+			  if (graphInstance && !graphInstance.destroyed) {
+			    graphInstance.destroy();
+			    graphInstance = null;
+			  }
+			  
+			  // 清空画布容器
+			  const container = document.getElementById('graphContainer');
+			  container.innerHTML = ''; // 双重保障清空内容
+			});
 			document.getElementById('parseButton').addEventListener('click', function() {
+				parseButton.innerHTML = '解析中...';
+				parseButton.disabled = true;
 				let ddlInput = document.getElementById('ddlInput').value;
 				// ddlInput = initDDL();
 				const entities = {};
@@ -114,8 +140,8 @@
 						id: table,
 						label: table,
 						team: table,
-						size: 30,
-						type: 'rect' ,// 表节点用矩形表示
+						size: table.length * 6 + 40, // 根据表名长度动态调整尺寸
+						type: 'rect', // 表节点用矩形表示
 						isDia: 0,
 					};
 					allNodes.push(tableNode);
@@ -125,8 +151,8 @@
 							id: `${table}_${column.name}`,
 							label: column.name,
 							team: table,
-							size: 20,
-							type: 'circle' ,// 属性节点用圆形表示
+							size: Math.min(column.name.length * 4 + 20, 80), // 限制最大尺寸
+							type: 'circle', // 属性节点用圆形表示
 							isDia: 0,
 						};
 						allNodes.push(columnNode);
@@ -174,7 +200,7 @@
 						id: `relation_${index}`,
 						label: relationType,
 						type: 'diamond',
-						size: 25,
+						size: 35,
 						isDia: 1,
 					};
 					allNodes.push(relationNode);
@@ -182,7 +208,7 @@
 					const edge1 = {
 						source: rel.fromTable,
 						target: `relation_${index}`,
-						label: '',
+						label: 'N',
 						isDia: 1,
 					};
 					allEdges.push(edge1);
@@ -190,7 +216,7 @@
 					const edge2 = {
 						source: `relation_${index}`,
 						target: rel.toTable,
-						label: '',
+						label: '1',
 						isDia: 1,
 					};
 					allEdges.push(edge2);
@@ -209,21 +235,55 @@
 						style: {
 							labelText: (d) => d.label,
 							labelPlacement: "center",
-						},
+							fill: (d) => {
+								if (d.type === 'rect') return '#e8f5e9'; // 表节点背景色
+								if (d.type === 'diamond') return '#fff3e0'; // 关系节点背景色
+								return '#f5f5f5'; // 默认背景
+							},
+							stroke: '#4CAF50', // 边框颜色
+							lineWidth: 2,
+							size: (d) => d.size,
+							radius: (d) => d.size,
+							// 动态字体大小配置
+							fontSize: (d) => {
+								const baseSize = d.type === 'rect' ? 14 : 12; // 表名大些，其他小些
+								const maxWidth = d.size * (d.type === 'rect' ? 3 : 2); // 根据节点尺寸计算最大宽度
 
+								let fontSize = baseSize;
+								while (getTextWidth(d.label, fontSize) > maxWidth && fontSize > 8) {
+									fontSize -= 1;
+								}
+								return fontSize;
+							},
+							// 自动换行配置
+							textWrap: {
+								maxWidth: (d) => d.size * (d.type === 'rect' ? 4 : 3), // 不同节点类型不同宽度
+								wordWrapWidth: (d) => d.size * (d.type === 'rect' ? 4 : 3),
+								maxLines: 2,
+								ellipsis: true // 超长显示省略号
+							},
+						},
+						palette: 'tableau',
 					},
 					edge: {
-						label: {
-							position: 'center'
+						style: {
+							labelText: (d) => d.label,
+							position: 'center',
 						}
+						// label: {
+						// 	// labelText: (d) => d.label,
+						// 	labelText: "labelText",
+						// 	position: 'center'
+						// }
 					},
 					layout: {
 						type: 'd3-force',
+						// preventOverlap: true, // 新增防止重叠
 						link: {
 							distance: (d) => {
 								// 同一团队内的连接距离更短
 								if (d.source.team === d.target.team) return 50;
-								
+
 								// 菱形也属于一个团队
 								if (d.source.isDia === 1 || d.target.isDia === 1) return 50;
 								// 不同团队间的连接距离更长
@@ -247,18 +307,34 @@
 						},
 						// 配置碰撞力 - 防止节点重叠
 						collide: {
-							radius: 35,
-							strength: 0.8,
+							radius: 55,
+							strength: 1.8,
 						},
 						// 配置中心力 - 保持图形在画布中心
 						center: {
-							strength: 0.05,
+							strength: 0.03,
 						},
 					},
 					behaviors: ['drag-element-force'],
+					plugins: [{
+						type: 'grid-line',
+						key: 'grid-line',
+						size: 30
+					}],
 				});
 
 				graph.render();
+				graph.on('afterrender', () => {
+					parseButton.innerHTML = '解析';
+					parseButton.disabled = false;
+				});
+				graphInstance = graph; // 保存实例引用
+				window.addEventListener('resize', () => {
+					graph.setSize([
+						document.getElementById('graphContainer').scrollWidth,
+						document.getElementById('graphContainer').scrollHeight
+					]);
+				});
 			});
 		</script>
 	</body>
